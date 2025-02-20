@@ -1,8 +1,11 @@
+
+
 import sys
 import json
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QLabel, QSizePolicy, QScrollArea,
                              QWidget, QPushButton, QFileDialog, QMessageBox,
-                             QHBoxLayout, QMenu, QToolBar, QStatusBar)
+                             QHBoxLayout, QVBoxLayout, QGroupBox, QLineEdit, QTextEdit,
+                             QListWidget, QToolBar, QStatusBar, QDialog, QDialogButtonBox)
 from PyQt6.QtCore import Qt, QRect, QPoint
 from PyQt6.QtGui import (QPixmap, QPainter, QPen, QColor, QCursor, QShortcut,
                          QImage, QMouseEvent, QAction, QKeySequence)
@@ -14,6 +17,8 @@ class DrawROI:
     Represents a Region of Interest (DrawROI) in an image.
     Allows resizing and moving operations with handles and edges.
     """
+    roi_counter = 0
+
     def __init__(self, start_point: QPoint, end_point: QPoint):
         """
         Initializes the ROI with start and end points.
@@ -26,6 +31,12 @@ class DrawROI:
         self.selected = False
         self.resize_handle = None
         self.edge_thickness = 2
+
+        # افزایش شمارنده و تنظیم نام منحصر به فرد
+        DrawROI.roi_counter += 1
+        self.name = f"ROI_{DrawROI.roi_counter}"
+        self.description = ""  # توضیحات اضافی
+        self.tags = []  # برچسب‌ها
 
     def get_rect(self) -> QRect:
         """
@@ -156,20 +167,121 @@ class DrawROI:
         """
         return {
             'start': {'x': self.start.x(), 'y': self.start.y()},
-            'end': {'x': self.end.x(), 'y': self.end.y()}
+            'end': {'x': self.end.x(), 'y': self.end.y()},
+            'name': self.name,
+            'description': self.description,
+            'tags': self.tags
         }
 
     @classmethod
-    def from_dict(cls, data):
-        """
-        Creates an ROI instance from a dictionary.
+    def reset_counter(cls):
+        """Reset the ROI counter to zero"""
+        cls.roi_counter = 0
 
-        :param data: dict - The dictionary containing ROI data.
-        :return: ROI - The reconstructed ROI instance.
-        """
-        start = QPoint(data['start']['x'], data['start']['y'])
-        end = QPoint(data['end']['x'], data['end']['y'])
-        return cls(start, end)
+    @classmethod
+    def from_dict(cls, data):
+        roi = cls(
+            QPoint(data['start']['x'], data['start']['y']),
+            QPoint(data['end']['x'], data['end']['y'])
+        )
+        roi.name = data.get('name', f'ROI_{cls.roi_counter}')
+        roi.description = data.get('description', '')
+        roi.tags = data.get('tags', [])
+        return roi
+
+
+# کلاس پنجره ویرایش ROI
+class ROIEditorDialog(QDialog):
+    def __init__(self, roi: DrawROI, parent=None):
+        super().__init__(parent)
+        self.roi = roi
+        self.setup_ui()
+
+    def setup_ui(self):
+        self.setWindowTitle("ویرایش ROI")
+        self.setMinimumWidth(400)
+
+        layout = QVBoxLayout(self)
+
+        # نام ROI
+        name_group = QGroupBox("نام و اطلاعات اصلی")
+        name_layout = QVBoxLayout()
+
+        name_label = QLabel("نام:")
+        self.name_edit = QLineEdit(self.roi.name)
+        name_layout.addWidget(name_label)
+        name_layout.addWidget(self.name_edit)
+
+        # مختصات
+        coords_label = QLabel(f"مختصات:")
+        rect = self.roi.get_rect()
+        coords_text = f"X: {rect.x()}, Y: {rect.y()}\nWidth: {rect.width()}, Height: {rect.height()}"
+        coords_display = QLabel(coords_text)
+        coords_display.setStyleSheet("background-color: #f0f0f0; padding: 5px;")
+        name_layout.addWidget(coords_label)
+        name_layout.addWidget(coords_display)
+
+        name_group.setLayout(name_layout)
+        layout.addWidget(name_group)
+
+        # توضیحات
+        desc_group = QGroupBox("توضیحات")
+        desc_layout = QVBoxLayout()
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setPlainText(self.roi.description)
+        self.desc_edit.setMaximumHeight(100)
+        desc_layout.addWidget(self.desc_edit)
+        desc_group.setLayout(desc_layout)
+        layout.addWidget(desc_group)
+
+        # برچسب‌ها
+        tags_group = QGroupBox("برچسب‌ها")
+        tags_layout = QVBoxLayout()
+
+        tags_input_layout = QHBoxLayout()
+        self.tag_edit = QLineEdit()
+        add_tag_btn = QPushButton("افزودن")
+        add_tag_btn.clicked.connect(self.add_tag)
+        tags_input_layout.addWidget(self.tag_edit)
+        tags_input_layout.addWidget(add_tag_btn)
+
+        self.tags_list = QListWidget()
+        self.tags_list.addItems(self.roi.tags)
+        remove_tag_btn = QPushButton("حذف برچسب انتخاب شده")
+        remove_tag_btn.clicked.connect(self.remove_tag)
+
+        tags_layout.addLayout(tags_input_layout)
+        tags_layout.addWidget(self.tags_list)
+        tags_layout.addWidget(remove_tag_btn)
+
+        tags_group.setLayout(tags_layout)
+        layout.addWidget(tags_group)
+
+        # دکمه‌های تأیید و لغو
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def add_tag(self):
+        tag = self.tag_edit.text().strip()
+        if tag and tag not in self.roi.tags:
+            self.tags_list.addItem(tag)
+            self.tag_edit.clear()
+
+    def remove_tag(self):
+        current_item = self.tags_list.currentItem()
+        if current_item:
+            self.tags_list.takeItem(self.tags_list.row(current_item))
+
+    def accept(self):
+        self.roi.name = self.name_edit.text()
+        self.roi.description = self.desc_edit.toPlainText()
+        self.roi.tags = [self.tags_list.item(i).text()
+                         for i in range(self.tags_list.count())]
+        super().accept()
 
 
 
@@ -231,6 +343,7 @@ class ImageProcessor(QMainWindow):
         self.image_label.mousePressEvent = self.mousePressEvent
         self.image_label.mouseMoveEvent = self.mouseMoveEvent
         self.image_label.mouseReleaseEvent = self.mouseReleaseEvent
+        self.image_label.mouseDoubleClickEvent = self.mouseDoubleClickEvent
 
         self.create_toolbar()
         # اضافه کردن کلیدهای میانبر
@@ -306,6 +419,7 @@ class ImageProcessor(QMainWindow):
             self.scale_factor = 1.0
             self.fit_to_screen()
             self.roi_list.clear()
+            DrawROI.reset_counter()  # ریست کردن شمارنده
             self.update_status()
 
     def save_rois(self):
@@ -389,6 +503,7 @@ class ImageProcessor(QMainWindow):
             if reply == QMessageBox.StandardButton.Yes:
                 self.roi_list.clear()
                 self.selected_roi = None
+                DrawROI.reset_counter()  # ریست کردن شمارنده
                 self.update_image()
                 self.update_status()
 
@@ -586,6 +701,23 @@ class ImageProcessor(QMainWindow):
         self.last_point = None
         self.update_status()
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if not self.image_label.pixmap():
+            return
+
+        pos = self.map_to_image_coordinates(event.pos())
+        if pos is None:
+            return
+
+        # بررسی کلیک روی ROI
+        for roi in self.roi_list:
+            if roi.contains(pos):
+                dialog = ROIEditorDialog(roi, self)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    self.update_image()
+                    self.update_status()
+                break
+
     def update_image(self):
         try:
             if not self.image:
@@ -628,12 +760,25 @@ class ImageProcessor(QMainWindow):
                     handle_size = 6
                     for point in [scaled_rect.topLeft(), scaled_rect.topRight(),
                                   scaled_rect.bottomLeft(), scaled_rect.bottomRight()]:
+                        # رسم دستگیره های ROI
                         painter.fillRect(
                             point.x() - handle_size // 2,
                             point.y() - handle_size // 2,
                             handle_size, handle_size,
                             QColor(255, 0, 0)
                         )
+
+                        # رسم نام ROI
+                        font = painter.font()
+                        font.setBold(True)
+                        painter.setFont(font)
+                        name_rect = QRect(
+                            scaled_rect.x(),
+                            scaled_rect.y() - 20,  # بالای ROI
+                            scaled_rect.width(),
+                            20
+                        )
+                        painter.drawText(name_rect, Qt.AlignmentFlag.AlignCenter, roi.name)
 
             painter.end()
             self.image_label.setPixmap(temp_pixmap)
@@ -654,7 +799,10 @@ class ImageProcessor(QMainWindow):
 
             if self.selected_roi:
                 rect = self.selected_roi.get_rect()
-                status += f" | ROI انتخاب شده: ({rect.x()}, {rect.y()}, {rect.width()}, {rect.height()})"
+                status += f" | ROI: {self.selected_roi.name} "
+                status += f"({rect.x()}, {rect.y()}, {rect.width()}, {rect.height()})"
+                if self.selected_roi.tags:
+                    status += f" | برچسب‌ها: {', '.join(self.selected_roi.tags)}"
 
             self.statusBar.showMessage(status)
         except Exception as e:
