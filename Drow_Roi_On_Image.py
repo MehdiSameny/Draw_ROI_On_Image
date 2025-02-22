@@ -11,7 +11,6 @@ from PyQt6.QtGui import (QPixmap, QPainter, QPen, QColor, QCursor, QShortcut,
                          QImage, QMouseEvent, QAction, QKeySequence)
 
 
-
 class DrawROI:
     """
     Represents a Region of Interest (DrawROI) in an image.
@@ -31,12 +30,69 @@ class DrawROI:
         self.selected = False
         self.resize_handle = None
         self.edge_thickness = 2
+        self.icon_opacity = 0.1
+        self.icon_background_opacity = 0
 
-        # افزایش شمارنده و تنظیم نام منحصر به فرد
+        self.gear_icon = QPixmap("gear.png")
+        self.gear_icon = self.gear_icon.scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio,
+                                               Qt.TransformationMode.SmoothTransformation)
+
+        self.duplicate_icon = QPixmap("duplicate.png")
+        self.duplicate_icon = self.duplicate_icon.scaled(16, 16, Qt.AspectRatioMode.KeepAspectRatio,
+                                                         Qt.TransformationMode.SmoothTransformation)
+
+        # Increment the counter and set a unique name
         DrawROI.roi_counter += 1
         self.name = f"ROI_{DrawROI.roi_counter}"
-        self.description = ""  # توضیحات اضافی
-        self.tags = []  # برچسب‌ها
+        self.description = ""
+        self.tags = []
+
+    # We also need to update the is_on_icon method:
+    def is_on_icon(self, point: QPoint, scale_factor: float) -> str:
+        """
+        Checks if the point is on one of the icons
+
+        :param point: Point in the coordinates of the original image
+        :param scale_factor: Current scale factor
+        :return: 'gear' or 'duplicate' or None
+        """
+        # Get the position of the icons
+        gear_pos, duplicate_pos, icon_size = self.get_icon_positions(scale_factor)
+
+        # Convert the position of the icons to the scale of the original image
+        gear_rect = QRect(
+            int(gear_pos.x() / scale_factor),
+            int(gear_pos.y() / scale_factor),
+            int(icon_size / scale_factor),
+            int(icon_size / scale_factor)
+        )
+        duplicate_rect = QRect(
+            int(duplicate_pos.x() / scale_factor),
+            int(duplicate_pos.y() / scale_factor),
+            int(icon_size / scale_factor),
+            int(icon_size / scale_factor)
+        )
+
+        if gear_rect.contains(point):
+            return 'gear'
+        elif duplicate_rect.contains(point):
+            return 'duplicate'
+        return None
+
+    # In the DrawROI class, we change the get_icon_positions method to this:
+    def get_icon_positions(self, scale_factor: float) -> tuple:
+        rect = self.get_rect()
+        icon_size = int(16 * scale_factor)
+        # Place icons above and outside the ROI
+        gear_pos = QPoint(
+            int(rect.right() * scale_factor) - icon_size - 5,
+            int(rect.top() * scale_factor) - icon_size - 5  # Outside ROI
+        )
+        duplicate_pos = QPoint(
+            int(rect.right() * scale_factor) - 2 * (icon_size + 5),
+            int(rect.top() * scale_factor) - icon_size - 5  # Outside ROI
+        )
+        return gear_pos, duplicate_pos, icon_size
 
     def get_rect(self) -> QRect:
         """
@@ -190,7 +246,6 @@ class DrawROI:
         return roi
 
 
-# کلاس پنجره ویرایش ROI
 class ROIEditorDialog(QDialog):
     def __init__(self, roi: DrawROI, parent=None):
         super().__init__(parent)
@@ -198,22 +253,20 @@ class ROIEditorDialog(QDialog):
         self.setup_ui()
 
     def setup_ui(self):
-        self.setWindowTitle("ویرایش ROI")
+        self.setWindowTitle("Edit ROI")
         self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
 
-        # نام ROI
-        name_group = QGroupBox("نام و اطلاعات اصلی")
+        name_group = QGroupBox("Name and information")
         name_layout = QVBoxLayout()
 
-        name_label = QLabel("نام:")
+        name_label = QLabel("Name:")
         self.name_edit = QLineEdit(self.roi.name)
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_edit)
 
-        # مختصات
-        coords_label = QLabel(f"مختصات:")
+        coords_label = QLabel(f"Coordinate:")
         rect = self.roi.get_rect()
         coords_text = f"X: {rect.x()}, Y: {rect.y()}\nWidth: {rect.width()}, Height: {rect.height()}"
         coords_display = QLabel(coords_text)
@@ -224,8 +277,7 @@ class ROIEditorDialog(QDialog):
         name_group.setLayout(name_layout)
         layout.addWidget(name_group)
 
-        # توضیحات
-        desc_group = QGroupBox("توضیحات")
+        desc_group = QGroupBox("Information")
         desc_layout = QVBoxLayout()
         self.desc_edit = QTextEdit()
         self.desc_edit.setPlainText(self.roi.description)
@@ -234,20 +286,19 @@ class ROIEditorDialog(QDialog):
         desc_group.setLayout(desc_layout)
         layout.addWidget(desc_group)
 
-        # برچسب‌ها
-        tags_group = QGroupBox("برچسب‌ها")
+        tags_group = QGroupBox("Tags")
         tags_layout = QVBoxLayout()
 
         tags_input_layout = QHBoxLayout()
         self.tag_edit = QLineEdit()
-        add_tag_btn = QPushButton("افزودن")
+        add_tag_btn = QPushButton("Add")
         add_tag_btn.clicked.connect(self.add_tag)
         tags_input_layout.addWidget(self.tag_edit)
         tags_input_layout.addWidget(add_tag_btn)
 
         self.tags_list = QListWidget()
         self.tags_list.addItems(self.roi.tags)
-        remove_tag_btn = QPushButton("حذف برچسب انتخاب شده")
+        remove_tag_btn = QPushButton("Delete selected tag")
         remove_tag_btn.clicked.connect(self.remove_tag)
 
         tags_layout.addLayout(tags_input_layout)
@@ -257,7 +308,6 @@ class ROIEditorDialog(QDialog):
         tags_group.setLayout(tags_layout)
         layout.addWidget(tags_group)
 
-        # دکمه‌های تأیید و لغو
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -282,7 +332,6 @@ class ROIEditorDialog(QDialog):
         self.roi.tags = [self.tags_list.item(i).text()
                          for i in range(self.tags_list.count())]
         super().accept()
-
 
 
 class ImageProcessor(QMainWindow):
@@ -325,7 +374,7 @@ class ImageProcessor(QMainWindow):
         self.statusBar.setObjectName("statusbar")
         self.setStatusBar(self.statusBar)
 
-        # متغیرهای مورد نیاز
+        # Required variables
         self.image = None
         self.image_path = None
         self.drawing = False
@@ -335,10 +384,10 @@ class ImageProcessor(QMainWindow):
         self.resize_handle = None
         self.scale_factor = 1.0
 
-        # تنظیم نشانگر ماوس به شکل +
+        # Set the mouse cursor to +
         self.image_label.setCursor(Qt.CursorShape.CrossCursor)
 
-        # نصب event filters
+        # Install event filters
         self.image_label.setMouseTracking(True)
         self.image_label.mousePressEvent = self.mousePressEvent
         self.image_label.mouseMoveEvent = self.mouseMoveEvent
@@ -346,52 +395,49 @@ class ImageProcessor(QMainWindow):
         self.image_label.mouseDoubleClickEvent = self.mouseDoubleClickEvent
 
         self.create_toolbar()
-        # اضافه کردن کلیدهای میانبر
         self.create_shortcuts()
 
     def create_toolbar(self):
         toolbar = QToolBar()
         self.addToolBar(toolbar)
 
-        # دکمه‌های نوار ابزار
-        open_action = QAction('باز کردن تصویر', self)
+        open_action = QAction('Import Picture', self)
         open_action.triggered.connect(self.open_image)
         toolbar.addAction(open_action)
 
-        save_roi_action = QAction('ذخیره ROIها', self)
+        save_roi_action = QAction('Save ROI', self)
         save_roi_action.triggered.connect(self.save_rois)
         toolbar.addAction(save_roi_action)
 
-        load_roi_action = QAction('بارگذاری ROIها', self)
+        load_roi_action = QAction('Load ROI', self)
         load_roi_action.triggered.connect(self.load_rois)
         toolbar.addAction(load_roi_action)
 
         toolbar.addSeparator()
 
-        delete_roi_action = QAction('حذف ROI انتخاب شده', self)
+        delete_roi_action = QAction('Delete Selected ROI', self)
         delete_roi_action.triggered.connect(self.delete_selected_roi)
         toolbar.addAction(delete_roi_action)
 
-        clear_rois_action = QAction('حذف همه ROIها', self)
+        clear_rois_action = QAction('Delete All ROI', self)
         clear_rois_action.triggered.connect(self.clear_rois)
         toolbar.addAction(clear_rois_action)
 
         toolbar.addSeparator()
 
-        zoom_in_action = QAction('بزرگنمایی', self)
+        zoom_in_action = QAction('Zoom in', self)
         zoom_in_action.triggered.connect(self.zoom_in)
         toolbar.addAction(zoom_in_action)
 
-        zoom_out_action = QAction('کوچکنمایی', self)
+        zoom_out_action = QAction('Zoom Out', self)
         zoom_out_action.triggered.connect(self.zoom_out)
         toolbar.addAction(zoom_out_action)
 
-        fit_screen_action = QAction('تناسب با صفحه', self)
+        fit_screen_action = QAction('Scal Monitor', self)
         fit_screen_action.triggered.connect(self.fit_to_screen)
         toolbar.addAction(fit_screen_action)
 
     def create_shortcuts(self):
-        # کلیدهای میانبر
         QShortcut(QKeySequence('Ctrl+O'), self, self.open_image)
         QShortcut(QKeySequence('Ctrl+S'), self, self.save_rois)
         QShortcut(QKeySequence('Ctrl+L'), self, self.load_rois)
@@ -404,7 +450,7 @@ class ImageProcessor(QMainWindow):
     def open_image(self):
         file_name, _ = QFileDialog.getOpenFileName(
             self,
-            "انتخاب تصویر",
+            "Chose Picture",
             "",
             "Image Files (*.png *.jpg *.jpeg *.bmp)"
         )
@@ -413,23 +459,23 @@ class ImageProcessor(QMainWindow):
             self.image_path = file_name
             self.image = QImage(file_name)
             if self.image.isNull():
-                QMessageBox.critical(self, "خطا", "خطا در بارگذاری تصویر")
+                QMessageBox.critical(self, "Error", "Can not load image")
                 return
 
             self.scale_factor = 1.0
             self.fit_to_screen()
             self.roi_list.clear()
-            DrawROI.reset_counter()  # ریست کردن شمارنده
+            DrawROI.reset_counter()
             self.update_status()
 
     def save_rois(self):
         if not self.image_path or not self.roi_list:
-            QMessageBox.warning(self, "هشدار", "تصویر یا ROI برای ذخیره وجود ندارد")
+            QMessageBox.warning(self, "warning", "There is not picture or ROI")
             return
 
         file_name, _ = QFileDialog.getSaveFileName(
             self,
-            "ذخیره ROIها",
+            "Save ROI's",
             "",
             "JSON Files (*.json)"
         )
@@ -443,14 +489,14 @@ class ImageProcessor(QMainWindow):
             try:
                 with open(file_name, 'w') as f:
                     json.dump(data, f)
-                self.statusBar.showMessage("ROIها با موفقیت ذخیره شدند", 3000)
+                self.statusBar.showMessage("Save all ROI's", 3000)
             except Exception as e:
-                QMessageBox.critical(self, "خطا", f"خطا در ذخیره ROIها: {str(e)}")
+                QMessageBox.critical(self, "Error", f"Not save ROI: {str(e)}")
 
     def load_rois(self):
         file_name, _ = QFileDialog.getOpenFileName(
             self,
-            "بارگذاری ROIها",
+            "Load ROI's",
             "",
             "JSON Files (*.json)"
         )
@@ -460,29 +506,29 @@ class ImageProcessor(QMainWindow):
                 with open(file_name, 'r') as f:
                     data = json.load(f)
 
-                # بررسی تطابق تصویر
+                # Image matching check
                 if self.image_path != data['image_path']:
                     reply = QMessageBox.question(
                         self,
-                        "هشدار",
-                        "تصویر فعلی با تصویر ذخیره شده متفاوت است. آیا مایل به بارگذاری تصویر جدید هستید؟",
+                        "Warning",
+                        "The current image is different from the saved image. Do you want to upload a new image?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                     )
 
                     if reply == QMessageBox.StandardButton.Yes:
                         self.image = QImage(data['image_path'])
                         if self.image.isNull():
-                            raise Exception("خطا در بارگذاری تصویر")
+                            raise Exception("Can not Load Picture")
                         self.image_path = data['image_path']
                         self.fit_to_screen()
 
                 self.roi_list = [DrawROI.from_dict(roi_data) for roi_data in data['rois']]
                 self.selected_roi = None
                 self.update_image()
-                self.statusBar.showMessage("ROIها با موفقیت بارگذاری شدند", 3000)
+                self.statusBar.showMessage("Successfully loaded ROI's", 3000)
 
             except Exception as e:
-                QMessageBox.critical(self, "خطا", f"خطا در بارگذاری ROIها: {str(e)}")
+                QMessageBox.critical(self, "Error", f"Can not Load ROI: {str(e)}")
 
     def delete_selected_roi(self):
         if self.selected_roi in self.roi_list:
@@ -495,15 +541,15 @@ class ImageProcessor(QMainWindow):
         if self.roi_list:
             reply = QMessageBox.question(
                 self,
-                "تأیید حذف",
-                "آیا مطمئن هستید که می‌خواهید تمام ROIها را حذف کنید؟",
+                "Delete",
+                "Are you shore delete all ROI's",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
 
             if reply == QMessageBox.StandardButton.Yes:
                 self.roi_list.clear()
                 self.selected_roi = None
-                DrawROI.reset_counter()  # ریست کردن شمارنده
+                DrawROI.reset_counter()
                 self.update_image()
                 self.update_status()
 
@@ -525,7 +571,7 @@ class ImageProcessor(QMainWindow):
         if not self.image:
             return
 
-            # محاسبه مقیاس مناسب برای نمایش کامل تصویر
+        # Calculate the appropriate scale to display the full image
         label_size = self.image_label.size()
         scaled_width = label_size.width()
         scaled_height = label_size.height()
@@ -575,11 +621,38 @@ class ImageProcessor(QMainWindow):
 
         try:
             pos = self.map_to_image_coordinates(event.pos())
-            if pos is None:  # اگر ماوس خارج از محدوده تصویر باشد
+            # If the mouse is outside the image area
+            if pos is None:
                 return
             clicked_on_existing = False
 
-            # بررسی کلیک روی ROI موجود
+            # Check icon clicks for selected ROI
+            if self.selected_roi:
+                icon_clicked = self.selected_roi.is_on_icon(pos, self.scale_factor)
+                if icon_clicked == 'gear':
+                    # Open the edit window
+                    dialog = ROIEditorDialog(self.selected_roi, self)
+                    if dialog.exec() == QDialog.DialogCode.Accepted:
+                        self.update_image()
+                        self.update_status()
+                    return
+                elif icon_clicked == 'duplicate':
+                    # Create a copy of the ROI
+                    offset = 10
+                    new_roi = DrawROI(
+                        QPoint(self.selected_roi.start.x() + offset, self.selected_roi.start.y() + offset),
+                        QPoint(self.selected_roi.end.x() + offset, self.selected_roi.end.y() + offset)
+                    )
+                    #new_roi.name = f"Copy_of_{self.selected_roi.name}"
+                    new_roi.description = self.selected_roi.description
+                    new_roi.tags = self.selected_roi.tags.copy()
+                    self.roi_list.append(new_roi)
+                    self.selected_roi = new_roi
+                    self.update_image()
+                    self.update_status()
+                    return
+
+            # Check existing ROI clicks
             for roi in self.roi_list:
                 handle = roi.is_on_handle(pos)
                 if handle:
@@ -591,9 +664,11 @@ class ImageProcessor(QMainWindow):
                     self.update_status()
                     break
 
-                edge = roi.is_near_edge(pos)  # بررسی لبه‌ها
+                # Check edges
+                edge = roi.is_near_edge(pos)
                 if edge:
-                    self.resize_handle = edge  # مقداردهی دستگیره تغییر اندازه برای لبه‌ها
+                    # Set the resize handle for the edges
+                    self.resize_handle = edge
                     self.selected_roi = roi
                     self.last_point = pos
                     clicked_on_existing = True
@@ -609,7 +684,7 @@ class ImageProcessor(QMainWindow):
                     self.update_status()
                     break
 
-            # فقط در صورتی که روی هیچ ROI موجودی کلیک نشده باشد، ROI جدید ایجاد کن
+            # Create a new ROI only if no existing ROI has been clicked on.
             if not clicked_on_existing:
                 self.drawing = True
                 self.selected_roi = DrawROI(pos, pos)
@@ -626,36 +701,51 @@ class ImageProcessor(QMainWindow):
 
         try:
             pos = self.map_to_image_coordinates(event.pos())
-            if pos is None:  # اگر ماوس خارج از محدوده تصویر باشد
+            # If the mouse is outside the image area
+            if pos is None:
                 return
 
-            # تنظیم شکل نشانگر موس بر اساس موقعیت
+            # Adjust mouse cursor shape based on positio
             cursor_updated = False
-            for roi in self.roi_list:
-                handle = roi.is_on_handle(pos)
-                edge = roi.is_near_edge(pos)
 
-                if handle or edge:
+            # Mouse over icons for selected ROI
+            if self.selected_roi:
+                icon_type = self.selected_roi.is_on_icon(pos, self.scale_factor)
+                if icon_type:
+                    self.image_label.setCursor(Qt.CursorShape.PointingHandCursor)
+                    self.selected_roi.icon_background_opacity = 150
+                    self.selected_roi.icon_opacity = 0.9
                     cursor_updated = True
-                    self.image_label.setCursor(roi.get_cursor_shape(pos))
-                    break
-
-                elif roi.contains(pos):
-                    cursor_updated = True
-                    self.image_label.setCursor(Qt.CursorShape.SizeAllCursor)
-                    break
+                else:
+                    self.selected_roi.icon_background_opacity = 0
+                    self.selected_roi.icon_opacity = 0.2
 
             if not cursor_updated:
-                self.image_label.setCursor(Qt.CursorShape.CrossCursor)
+                # Check other mouse modes (same as before)
+                for roi in self.roi_list:
+                    handle = roi.is_on_handle(pos)
+                    edge = roi.is_near_edge(pos)
 
-            # تغییر اندازه یا جابجایی ROI
+                    if handle or edge:
+                        cursor_updated = True
+                        self.image_label.setCursor(roi.get_cursor_shape(pos))
+                        break
+
+                    elif roi.contains(pos):
+                        cursor_updated = True
+                        self.image_label.setCursor(Qt.CursorShape.SizeAllCursor)
+                        break
+
+                if not cursor_updated:
+                    self.image_label.setCursor(Qt.CursorShape.CrossCursor)
+
+            # Resize or move ROI
             if self.drawing:
                 self.selected_roi.end = pos
-                self.update_image()
 
             elif self.selected_roi and self.last_point:
                 if self.resize_handle:
-                    # تغییر اندازه ROI
+                    # Change ROI size
                     dx = pos.x() - self.last_point.x()
                     dy = pos.y() - self.last_point.y()
 
@@ -679,18 +769,18 @@ class ImageProcessor(QMainWindow):
                         self.selected_roi.end.setY(self.selected_roi.end.y() + dy)
 
                     self.selected_roi.get_rect()  # Normalize the rectangle
-                    self.update_image()
 
                 else:
-                    # جابجایی ROI
+                    # ROI relocation
                     dx = pos.x() - self.last_point.x()
                     dy = pos.y() - self.last_point.y()
                     self.selected_roi.start += QPoint(dx, dy)
                     self.selected_roi.end += QPoint(dx, dy)
-                    self.update_image()
 
                 self.last_point = pos
-                self.update_status()
+
+            self.update_image()
+            self.update_status()
 
         except Exception as e:
             print(f"[mouseMoveEvent] {e}")
@@ -705,13 +795,15 @@ class ImageProcessor(QMainWindow):
         if not self.image_label.pixmap():
             return
 
+        # Convert mouse coordinates to original image coordinates
         pos = self.map_to_image_coordinates(event.pos())
         if pos is None:
             return
 
-        # بررسی کلیک روی ROI
+        # If the icons are not clicked, check the click on the ROI itself
         for roi in self.roi_list:
             if roi.contains(pos):
+                self.selected_roi = roi
                 dialog = ROIEditorDialog(roi, self)
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     self.update_image()
@@ -723,11 +815,11 @@ class ImageProcessor(QMainWindow):
             if not self.image:
                 return
 
-            # محاسبه ابعاد مقیاس شده
+            # Calculate scaled dimensions
             scaled_width = int(self.image.width() * self.scale_factor)
             scaled_height = int(self.image.height() * self.scale_factor)
 
-            # ایجاد pixmap با اندازه مقیاس شده
+            # Create a pixmap with scaled size
             temp_pixmap = QPixmap.fromImage(self.image).scaled(
                 scaled_width,
                 scaled_height,
@@ -738,13 +830,14 @@ class ImageProcessor(QMainWindow):
             painter = QPainter(temp_pixmap)
 
             for roi in self.roi_list:
+
                 if roi == self.selected_roi:
-                    pen = QPen(QColor(255, 0, 0), 2)  # قرمز برای ROI انتخاب شده
+                    pen = QPen(QColor(255, 0, 0), 2)
                 else:
-                    pen = QPen(QColor(0, 255, 0), 2)  # سبز برای سایر ROIها
+                    pen = QPen(QColor(0, 255, 0), 2)
                 painter.setPen(pen)
 
-                # تبدیل مختصات ROI به فضای pixmap
+                # Convert ROI coordinates to pixmap space
                 rect = roi.get_rect()
                 scaled_rect = QRect(
                     int(rect.x() * self.scale_factor),
@@ -755,12 +848,12 @@ class ImageProcessor(QMainWindow):
 
                 painter.drawRect(scaled_rect)
 
-                # رسم دستگیره‌های تغییر اندازه برای ROI انتخاب شده
+                # Draw resize handles for the selected ROI
                 if roi == self.selected_roi:
                     handle_size = 6
                     for point in [scaled_rect.topLeft(), scaled_rect.topRight(),
                                   scaled_rect.bottomLeft(), scaled_rect.bottomRight()]:
-                        # رسم دستگیره های ROI
+                        # Draw ROI handles
                         painter.fillRect(
                             point.x() - handle_size // 2,
                             point.y() - handle_size // 2,
@@ -768,13 +861,35 @@ class ImageProcessor(QMainWindow):
                             QColor(255, 0, 0)
                         )
 
-                        # رسم نام ROI
+                        # Show icons
+                        gear_pos, duplicate_pos, icon_size = roi.get_icon_positions(self.scale_factor)
+
+                        # Draw a semi-transparent background for icons
+                        painter.setOpacity(roi.icon_opacity)
+                        painter.fillRect(
+                            gear_pos.x(), gear_pos.y(),
+                            icon_size, icon_size,
+                            QColor(255, 255, 255, roi.icon_background_opacity)
+                        )
+                        painter.fillRect(
+                            duplicate_pos.x(), duplicate_pos.y(),
+                            icon_size, icon_size,
+                            QColor(255, 255, 255, roi.icon_background_opacity)
+                        )
+                        painter.setOpacity(1.0)
+
+                        # Drawing icons
+                        painter.drawPixmap(gear_pos.x(), gear_pos.y(), icon_size, icon_size, roi.gear_icon)
+                        painter.drawPixmap(duplicate_pos.x(), duplicate_pos.y(), icon_size, icon_size,
+                                           roi.duplicate_icon)
+
+                        # Draw ROI name
                         font = painter.font()
                         font.setBold(True)
                         painter.setFont(font)
                         name_rect = QRect(
                             scaled_rect.x(),
-                            scaled_rect.y() - 20,  # بالای ROI
+                            scaled_rect.y() - 20,  # High ROI
                             scaled_rect.width(),
                             20
                         )
@@ -787,29 +902,29 @@ class ImageProcessor(QMainWindow):
             print(f"[update_image] {e}")
 
     def update_status(self):
-        """به‌روزرسانی نوار وضعیت با اطلاعات مفید"""
+        """Update status bar with useful information"""
         try:
             if not self.image:
-                self.statusBar.showMessage("تصویری بارگذاری نشده است")
+                self.statusBar.showMessage("Image not loaded.")
                 return
 
-            status = f"ابعاد تصویر: {self.image.width()}×{self.image.height()} | "
-            status += f"بزرگنمایی: {self.scale_factor:.2f}× | "
-            status += f"تعداد ROIها: {len(self.roi_list)}"
+            status = f"Image dimensions: {self.image.width()}×{self.image.height()} | "
+            status += f"Zoom: {self.scale_factor:.2f}× | "
+            status += f"Number of ROIs:{len(self.roi_list)}"
 
             if self.selected_roi:
                 rect = self.selected_roi.get_rect()
                 status += f" | ROI: {self.selected_roi.name} "
                 status += f"({rect.x()}, {rect.y()}, {rect.width()}, {rect.height()})"
                 if self.selected_roi.tags:
-                    status += f" | برچسب‌ها: {', '.join(self.selected_roi.tags)}"
+                    status += f" | Tags: {', '.join(self.selected_roi.tags)}"
 
             self.statusBar.showMessage(status)
         except Exception as e:
             print(f"[update_status] {e}")
 
     def resizeEvent(self, event):
-        """مدیریت تغییر اندازه پنجره"""
+        """Window resize management"""
         super().resizeEvent(event)
         if self.image:
             self.fit_to_screen()
